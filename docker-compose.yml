@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: rh-central-postgres
+    environment:
+      POSTGRES_DB: rh_central
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - rh-central-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  rh-central-postgres-data:
