@@ -65,6 +65,19 @@ export function createCollaborator(payload) {
   });
 }
 
+export function deleteCollaborator(collaboratorId) {
+  return request(`/collaborators/${collaboratorId}`, {
+    method: "DELETE",
+  });
+}
+
+export function updateCollaboratorName(collaboratorId, name) {
+  return request(`/collaborators/${collaboratorId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+}
+
 export function getTickets() {
   return request("/tickets");
 }

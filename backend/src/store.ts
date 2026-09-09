@@ -9,6 +9,7 @@ import type {
   AutomationEvent,
   AutomationEventType,
   Collaborator,
+  CollaboratorStatus,
   DatabaseShape,
   ServiceWindow,
   SmartInsight,
@@ -677,6 +678,34 @@ export async function createCollaborator(collaborator: Omit<Collaborator, "id">)
   );
 
   return record;
+}
+
+export async function deleteCollaborator(id: string): Promise<"deleted" | "not_found" | "has_tickets" | "not_terminated"> {
+  const { rows } = await runQuery<{ status: CollaboratorStatus; has_tickets: boolean }>(
+    `
+      SELECT c.status, EXISTS (SELECT 1 FROM tickets WHERE collaborator_id = c.id) AS has_tickets
+      FROM collaborators c
+      WHERE c.id = $1
+    `,
+    [id],
+  );
+  const target = rows[0];
+
+  if (!target) return "not_found";
+  if (target.status !== "DESLIGADO") return "not_terminated";
+  if (target.has_tickets) return "has_tickets";
+
+  await runQuery(`DELETE FROM collaborators WHERE id = $1`, [id]);
+  return "deleted";
+}
+
+export async function updateCollaboratorName(id: string, name: string): Promise<Collaborator | undefined> {
+  const { rows } = await runQuery<CollaboratorRow>(
+    `UPDATE collaborators SET name = $2 WHERE id = $1 RETURNING *`,
+    [id, name.trim()],
+  );
+
+  return rows[0] ? mapCollaboratorRow(rows[0]) : undefined;
 }
 
 export async function findCollaboratorByPhone(phone: string): Promise<Collaborator | undefined> {

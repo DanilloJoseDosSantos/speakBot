@@ -55,7 +55,7 @@ rh-central/
 ### Backend
 
 1. Entrar em backend
-2. Copiar [.env.example](backend/.env.example) para um arquivo .env se quiser alterar a conexão
+2. Copiar [.env.example](backend/.env.example) para um arquivo .env se quiser alterar a conexão ou configurar a Meta
 3. Subir o PostgreSQL com docker compose na raiz do projeto
 4. Executar npm install
 5. Executar npm run dev
@@ -63,6 +63,23 @@ rh-central/
 API padrão: <http://localhost:4000>
 
 Banco padrão: postgresql://postgres:postgres@localhost:5432/rh_central
+
+### WhatsApp Business da Meta
+
+O webhook da Meta usa as rotas:
+
+- GET /api/whatsapp/meta/webhook para validação do webhook
+- POST /api/whatsapp/meta/webhook para receber mensagens
+
+Configure no arquivo `backend/.env`:
+
+- `META_VERIFY_TOKEN`: token criado por você e informado na configuração do webhook da Meta
+- `META_ACCESS_TOKEN`: token permanente ou temporário do WhatsApp Business
+- `META_PHONE_NUMBER_ID`: ID do número de telefone no Meta for Developers
+- `META_APP_SECRET`: App Secret usado para validar a assinatura da Meta
+- `META_GRAPH_API_VERSION`: versão da Graph API, com `v23.0` como padrão
+
+Na Meta, informe como callback URL a URL pública HTTPS do backend seguida de `/api/whatsapp/meta/webhook`. O endereço `localhost` não pode ser acessado pelos servidores da Meta.
 
 ### Frontend
 

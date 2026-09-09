@@ -107,6 +107,17 @@ button {
   gap: 16px;
 }
 
+.hero-heading-row {
+  width: 100%;
+}
+
+.hero-heading-row .theme-toggle {
+  margin-left: auto;
+  position: absolute;
+  top: 32px;
+  right: 32px;
+}
+
 .theme-toggle {
   flex: 0 0 auto;
   border: 1px solid rgba(15, 118, 110, 0.18);
@@ -120,6 +131,7 @@ button {
 }
 
 .hero-panel {
+  position: relative;
   display: grid;
   grid-template-columns: 1.5fr 0.9fr;
   gap: 24px;
@@ -164,6 +176,7 @@ h1 {
   font-size: 1.05rem;
   line-height: 1.7;
   color: #4b5563;
+  white-space: nowrap;
 }
 
 :root[data-theme='dark'] h1 {
@@ -185,11 +198,27 @@ h1 {
 }
 
 .hero-card {
-  align-self: end;
-  padding: 24px;
+  align-self: start;
+  padding: 18px;
   background: linear-gradient(180deg, #0f766e 0%, #134e4a 100%);
   color: #effcf8;
   box-shadow: 0 18px 30px rgba(15, 118, 110, 0.2);
+}
+
+.logout-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 0;
+  width: fit-content;
+  justify-self: center;
+  padding: 8px 12px;
+}
+
+.logout-card .user-badge,
+.logout-card .ghost-button {
+  margin-top: 0;
 }
 
 .hero-card strong {
@@ -237,12 +266,13 @@ h1 {
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 18px;
+  gap: 12px;
   margin-top: 22px;
 }
 
 .metric {
-  padding: 22px;
+  min-height: 132px;
+  padding: 16px;
   border: 1px solid rgba(15, 23, 42, 0.04);
   background: rgba(255, 255, 255, 0.8);
   box-shadow: 0 12px 22px rgba(15, 23, 42, 0.04);
@@ -251,15 +281,15 @@ h1 {
 .metric span {
   display: block;
   font-family: 'Segoe UI', sans-serif;
-  font-size: 0.82rem;
+  font-size: 0.72rem;
   letter-spacing: 0.18em;
   text-transform: uppercase;
 }
 
 .metric strong {
   display: block;
-  margin-top: 14px;
-  font-size: 2.6rem;
+  margin-top: 10px;
+  font-size: 2.15rem;
   color: #111827;
 }
 
@@ -291,46 +321,9 @@ h1 {
 
 .content-grid {
   display: grid;
-  grid-template-columns: minmax(0, var(--split-ratio, 42%)) 10px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 22px;
   margin-top: 22px;
-}
-
-.split-divider {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 100%;
-  cursor: col-resize;
-  touch-action: none;
-  user-select: none;
-}
-
-.split-divider span {
-  width: 4px;
-  height: 76px;
-  border-radius: 999px;
-  background: rgba(15, 118, 110, 0.22);
-  transition: height 0.2s ease, background 0.2s ease;
-}
-
-.split-divider:hover span,
-.content-grid.is-resizing .split-divider span,
-.split-divider:focus-visible span {
-  height: 112px;
-  background: var(--primary);
-}
-
-.split-divider:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 4px;
-  border-radius: 8px;
-}
-
-.content-grid.is-resizing,
-.content-grid.is-resizing * {
-  cursor: col-resize !important;
-  user-select: none;
 }
 
 .panel {
@@ -384,6 +377,34 @@ h1 {
   box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.12);
 }
 
+.password-field {
+  position: relative;
+}
+
+.password-field input {
+  padding-right: 94px;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  border: 0;
+  padding: 7px 8px;
+  border-radius: 10px;
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.password-toggle:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
 .form-grid textarea {
   min-height: 140px;
   resize: vertical;
@@ -413,6 +434,12 @@ h1 {
 .primary-button {
   background: linear-gradient(180deg, var(--primary) 0%, var(--primary-strong) 100%);
   color: #f8fafc;
+}
+
+.form-grid > .primary-button {
+  width: max-content;
+  max-width: 100%;
+  justify-self: center;
 }
 
 .primary-button:hover,
@@ -478,6 +505,27 @@ h1 {
 .ticket-card small {
   margin: 0;
   color: #475569;
+}
+
+.list-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.inline-edit-input {
+  width: 100%;
+  min-height: 42px;
+  margin-bottom: 8px;
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+.danger-button {
+  color: #b91c1c;
+  border-color: rgba(185, 28, 28, 0.2);
+  background: #fff1f2;
 }
 
 .meta-stack {
@@ -845,6 +893,10 @@ h1 {
 }
 
 @media (max-width: 1040px) {
+  .subtitle {
+    white-space: normal;
+  }
+
   .hero-panel,
   .content-grid,
   .metrics-grid {
@@ -867,6 +919,14 @@ h1 {
   .metric,
   .login-card {
     padding: 18px;
+  }
+
+  .hero-heading-row {
+    align-items: center;
+  }
+
+  .hero-heading-row .theme-toggle {
+    position: static;
   }
 
   .ticket-topline,

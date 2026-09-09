@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import {
   createCollaborator,
   createTicketIntake,
   createWebhookIntake,
+  deleteCollaborator,
   getAutomationEvents,
   getCollaborators,
   getCurrentUser,
@@ -14,6 +15,7 @@ import {
   getTickets,
   login,
   runSlaSweep,
+  updateCollaboratorName,
   updateTicket,
   uploadTicketAttachment,
 } from './api'
@@ -126,9 +128,6 @@ function getErrorMessage(error) {
 
 function App() {
   const [theme, setTheme] = useState(() => window.localStorage.getItem(THEME_KEY) || 'light')
-  const [splitRatio, setSplitRatio] = useState(() => Number(window.localStorage.getItem('rh-central-split-ratio')) || 42)
-  const [isResizing, setIsResizing] = useState(false)
-  const contentGridRef = useRef(null)
   const [user, setUser] = useState(null)
   const [dashboard, setDashboard] = useState(null)
   const [collaborators, setCollaborators] = useState([])
@@ -138,6 +137,9 @@ function App() {
   const [managerQueue, setManagerQueue] = useState([])
   const [insightsPayload, setInsightsPayload] = useState(null)
   const [collaboratorForm, setCollaboratorForm] = useState(initialCollaboratorForm)
+  const [collaboratorSearch, setCollaboratorSearch] = useState('')
+  const [editingCollaboratorId, setEditingCollaboratorId] = useState(null)
+  const [editingCollaboratorName, setEditingCollaboratorName] = useState('')
   const [intakeForm, setIntakeForm] = useState(initialIntakeForm)
   const [webhookForm, setWebhookForm] = useState(initialWebhookForm)
   const [ticketAssignments, setTicketAssignments] = useState({})
@@ -147,48 +149,15 @@ function App() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [loginForm, setLoginForm] = useState({ username: 'rh', password: 'rh123' })
+  const [showPassword, setShowPassword] = useState(false)
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
     window.localStorage.setItem(THEME_KEY, theme)
   }, [theme])
 
-  useEffect(() => {
-    window.localStorage.setItem('rh-central-split-ratio', String(splitRatio))
-  }, [splitRatio])
-
-  useEffect(() => {
-    if (!isResizing) return undefined
-
-    const handlePointerMove = (event) => {
-      const grid = contentGridRef.current
-      if (!grid) return
-
-      const bounds = grid.getBoundingClientRect()
-      const nextRatio = ((event.clientX - bounds.left) / bounds.width) * 100
-      setSplitRatio(Math.min(65, Math.max(30, nextRatio)))
-    }
-
-    const stopResizing = () => setIsResizing(false)
-    window.addEventListener('pointermove', handlePointerMove)
-    window.addEventListener('pointerup', stopResizing)
-    window.addEventListener('pointercancel', stopResizing)
-
-    return () => {
-      window.removeEventListener('pointermove', handlePointerMove)
-      window.removeEventListener('pointerup', stopResizing)
-      window.removeEventListener('pointercancel', stopResizing)
-    }
-  }, [isResizing])
-
   const toggleTheme = () => {
     setTheme((currentTheme) => currentTheme === 'dark' ? 'light' : 'dark')
-  }
-
-  const handleResizeStart = (event) => {
-    event.preventDefault()
-    event.currentTarget.setPointerCapture?.(event.pointerId)
-    setIsResizing(true)
   }
 
   const loadData = async () => {
@@ -299,6 +268,49 @@ function App() {
       await createCollaborator(payload)
       setCollaboratorForm(initialCollaboratorForm)
       setSuccess('Colaborador cadastrado na Central RH.')
+      await loadData()
+    } catch (requestError) {
+      setError(getErrorMessage(requestError))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleCollaboratorDelete = async (collaborator) => {
+    if (submitting || collaborator.status !== 'DESLIGADO') return
+    if (!window.confirm(`Excluir o cadastro de ${collaborator.name}? Essa ação não pode ser desfeita.`)) return
+
+    setSubmitting(true)
+    try {
+      setError('')
+      setSuccess('')
+      await deleteCollaborator(collaborator.id)
+      setSuccess(`Cadastro de ${collaborator.name} excluído.`)
+      await loadData()
+    } catch (requestError) {
+      setError(getErrorMessage(requestError))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const startCollaboratorNameEdit = (collaborator) => {
+    setEditingCollaboratorId(collaborator.id)
+    setEditingCollaboratorName(collaborator.name)
+    setError('')
+    setSuccess('')
+  }
+
+  const handleCollaboratorNameSave = async (collaborator) => {
+    if (submitting) return
+    setSubmitting(true)
+    try {
+      setError('')
+      setSuccess('')
+      await updateCollaboratorName(collaborator.id, editingCollaboratorName)
+      setEditingCollaboratorId(null)
+      setEditingCollaboratorName('')
+      setSuccess(`Nome de ${collaborator.name} atualizado.`)
       await loadData()
     } catch (requestError) {
       setError(getErrorMessage(requestError))
@@ -433,7 +445,12 @@ function App() {
           {error ? <div className="feedback error">{error}</div> : null}
           <form className="form-grid" onSubmit={handleLoginSubmit}>
             <input value={loginForm.username} onChange={(event) => setLoginForm({ ...loginForm, username: event.target.value })} placeholder="Usuário" />
-            <input type="password" value={loginForm.password} onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })} placeholder="Senha" />
+            <div className="password-field">
+              <input type={showPassword ? 'text' : 'password'} value={loginForm.password} onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })} placeholder="Senha" />
+              <button type="button" className="password-toggle" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? 'Ocultar senha' : 'Visualizar senha'}>
+                {showPassword ? 'Ocultar' : 'Mostrar'}
+              </button>
+            </div>
             <button className="primary-button" type="submit" disabled={submitting}>{submitting ? 'Entrando...' : 'Entrar'}</button>
           </form>
           <div className="hint-box">
@@ -456,16 +473,13 @@ function App() {
               {theme === 'dark' ? '☀ Claro' : '☾ Escuro'}
             </button>
           </div>
-          <h1>Central de atendimento interno via WhatsApp corporativo</h1>
+          <h1>SpeakBot</h1>
           <p className="subtitle">
-            MVP do zero para validar colaborador ativo, registrar protocolos e operar a fila do RH sem usar WhatsApp pessoal.
+            Central de atendimento interno via WhatsApp corporativo para organizar solicitações, protocolos e a fila do RH.
           </p>
         </div>
-        <div className="hero-card">
-          <span className="hero-kicker">Canal controlado</span>
+        <div className="hero-card logout-card">
           <small className="user-badge">{user.name} • {user.role === 'rh' ? 'RH' : 'Gestor'}</small>
-          <strong>Somente colaboradores ativos com opt-in entram na fila.</strong>
-          <p>O foco desta fase e rastreabilidade: protocolo, categoria, prioridade, horario e acompanhamento pelo painel.</p>
           <button type="button" className="ghost-button light" onClick={handleLogout}>Sair</button>
         </div>
       </header>
@@ -496,11 +510,7 @@ function App() {
         </article>
       </section>
 
-      <main
-        ref={contentGridRef}
-        className={`content-grid ${isResizing ? 'is-resizing' : ''}`}
-        style={{ '--split-ratio': `${splitRatio}%` }}
-      >
+      <main className="content-grid">
         <section className="panel">
           <div className="panel-header">
             <div>
@@ -531,11 +541,17 @@ function App() {
             <button className="primary-button" type="submit" disabled={submitting}>{submitting ? 'Salvando...' : 'Salvar colaborador'}</button>
           </form> : <div className="read-only-box">Perfil gestor em modo de leitura para cadastro de colaboradores.</div>}
 
+          <div className="form-grid">
+            <input value={collaboratorSearch} onChange={(event) => setCollaboratorSearch(event.target.value)} placeholder="Buscar colaborador por nome" aria-label="Buscar colaborador por nome" />
+          </div>
+
           <div className="list-block">
-            {loading ? <p>Carregando base de colaboradores...</p> : collaborators.map((collaborator) => (
+            {loading ? <p>Carregando base de colaboradores...</p> : collaborators
+              .filter((collaborator) => collaborator.name.toLocaleLowerCase('pt-BR').includes(collaboratorSearch.trim().toLocaleLowerCase('pt-BR')))
+              .map((collaborator) => (
               <article key={collaborator.id} className="list-card">
                 <div>
-                  <h3>{collaborator.name}</h3>
+                  {editingCollaboratorId === collaborator.id ? <input className="inline-edit-input" value={editingCollaboratorName} onChange={(event) => setEditingCollaboratorName(event.target.value)} aria-label={`Editar nome de ${collaborator.name}`} /> : <h3>{collaborator.name}</h3>}
                   <p>{collaborator.registration} • {collaborator.role}</p>
                 </div>
                 <div className="meta-stack">
@@ -545,27 +561,18 @@ function App() {
                   <span>{collaborator.status}</span>
                   <span>{collaborator.whatsappOptIn ? 'opt-in ativo' : 'sem opt-in'}</span>
                 </div>
+                {user.role === 'rh' ? <div className="list-card-actions">
+                  {editingCollaboratorId === collaborator.id ? <>
+                    <button type="button" className="ghost-button" onClick={() => handleCollaboratorNameSave(collaborator)} disabled={submitting}>Salvar nome</button>
+                    <button type="button" className="ghost-button" onClick={() => setEditingCollaboratorId(null)} disabled={submitting}>Cancelar</button>
+                  </> : <button type="button" className="ghost-button" onClick={() => startCollaboratorNameEdit(collaborator)} disabled={submitting}>Editar nome</button>}
+                  {collaborator.status === 'DESLIGADO' ? <button type="button" className="ghost-button danger-button" onClick={() => handleCollaboratorDelete(collaborator)} disabled={submitting}>Excluir cadastro</button> : null}
+                </div> : null}
               </article>
-            ))}
+              ))}
+            {!loading && collaborators.length > 0 && collaborators.filter((collaborator) => collaborator.name.toLocaleLowerCase('pt-BR').includes(collaboratorSearch.trim().toLocaleLowerCase('pt-BR'))).length === 0 ? <p>Nenhum colaborador encontrado.</p> : null}
           </div>
         </section>
-
-        <div
-          className="split-divider"
-          role="separator"
-          aria-label="Redimensionar divisão entre cadastro e canal"
-          aria-valuemin="30"
-          aria-valuemax="65"
-          aria-valuenow={Math.round(splitRatio)}
-          tabIndex="0"
-          onPointerDown={handleResizeStart}
-          onKeyDown={(event) => {
-            if (event.key === 'ArrowLeft') setSplitRatio((value) => Math.max(30, value - 2))
-            if (event.key === 'ArrowRight') setSplitRatio((value) => Math.min(65, value + 2))
-          }}
-        >
-          <span />
-        </div>
 
         <section className="panel">
           <div className="panel-header">
