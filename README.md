@@ -14,7 +14,7 @@ Projeto de atendimento interno de RH da Rede Patão, agora identificado como spe
 
 ### Fase 1 - Comunicação estruturada
 
-- Cadastro de colaboradores com matrícula, unidade, setor, status e opt-in de WhatsApp
+- Cadastro de colaboradores com matrícula, CPF, unidade, setor, status e opt-in de WhatsApp
 - Bloqueio de acesso para não cadastrados, desligados ou sem autorização
 - Intake de mensagens do WhatsApp corporativo com geração automática de protocolo
 - Fila inicial de tickets RH com prioridade, categoria e mudança de status
@@ -40,6 +40,21 @@ Projeto de atendimento interno de RH da Rede Patão, agora identificado como spe
 - Recomendação automática com severidade para risco de SLA, tempo médio de resolução e concentração por categoria
 - Ranking de categorias mais demandadas e unidades com maior volume para orientar capacidade operacional
 - Painel web com visão integrada das fases 1, 2 e 3
+
+### Governança, auditoria e LGPD
+
+- Trilha append-only de operações sensíveis com ator, perfil, ação, recurso, data, IP, agente e metadados mínimos
+- Consulta da trilha restrita ao perfil RH em `GET /api/audit-logs`
+- Registro e consulta de solicitações do titular em `POST /api/privacy/requests` e `GET /api/privacy/requests`
+- Exportação estruturada dos dados do titular em `GET /api/privacy/collaborators/:id/export`
+- Termo vigente e decisão explícita do titular em `GET /api/privacy/terms` e `POST /api/privacy/consent`, com aceite ou recusa, versão, snapshot do texto e data
+- Cada decisão é arquivada em `consent_records` e pode ser baixada como planilha CSV por `GET /api/privacy/consent-records.csv` (RH)
+- O cadastro permanece `pending` e a planilha contém apenas o cabeçalho até o colaborador registrar aceite ou recusa na página pública
+- Ao cadastrar um colaborador com WhatsApp autorizado, o backend envia o link público `/consent` pela Meta quando as credenciais oficiais estiverem configuradas
+- Após o cadastro, somente nome e endereço podem ser corrigidos pelo RH; CPF, matrícula, telefone, unidade, setor, cargo, status e consentimentos não são editáveis
+- Exclusão de colaboradores e anonimização operacional estão bloqueadas para preservar a trilha e os registros arquivados
+- O painel não coloca mensagem de WhatsApp, nome de arquivo ou conteúdo de documento dentro da auditoria; esses dados permanecem nas tabelas operacionais e no armazenamento de anexos
+- CPF validado pelos dígitos verificadores, normalizado no banco e exibido com máscara no painel; registros antigos podem permanecer sem CPF até atualização cadastral
 
 ## Estrutura
 
@@ -113,6 +128,13 @@ Aplicação padrão: <http://localhost:5173>
 - POST /api/automation/sla-sweep
 - GET /api/manager/queue
 - GET /api/insights
+- GET /api/audit-logs (RH)
+- GET /api/privacy/requests (RH)
+- POST /api/privacy/requests (RH)
+- GET /api/privacy/terms
+- POST /api/privacy/consent
+- GET /api/privacy/consent-records.csv (RH)
+- GET /api/privacy/collaborators/:id/export (RH)
 
 ## Anexos
 
@@ -125,5 +147,15 @@ Aplicação padrão: <http://localhost:5173>
 
 1. Na raiz do projeto, executar docker compose up -d
 2. O backend cria as tabelas users, collaborators, tickets e ticket_attachments automaticamente
-3. O backend também cria a tabela automation_events para trilha de automação
+4. Se o banco estiver vazio, a primeira inicialização importa os dados do arquivo legado [backend/data/db.json](backend/data/db.json)
+
+### Checklist de inicialização
+
+1. Inicie o Docker Desktop e confirme que o engine Linux está disponível.
+2. Na raiz, execute `docker compose up -d` e confirme `docker compose ps` com o PostgreSQL em estado `running`.
+3. No backend, execute `npm install` e `npm run dev`.
+4. No frontend, execute `npm install` e `npm run dev`.
+5. Abra `http://localhost:5173/` e valide login, cadastro, termo LGPD, ticket, anexo e auditoria.
+
+Para um ambiente real, configure `CORS_ORIGIN` e `VITE_API_URL` com os domínios oficiais, use HTTPS, troque as credenciais iniciais, configure backup/retensão do PostgreSQL e substitua as sessões em memória por um armazenamento persistente antes de escalar o backend.
 4. Se o banco estiver vazio, a primeira inicialização importa os dados do arquivo legado [backend/data/db.json](backend/data/db.json)

@@ -6,6 +6,9 @@ import { runQuery } from "./database.js";
 import type {
   AuthRole,
   AuthUser,
+  ConsentRecord,
+  AuditAction,
+  AuditLog,
   AutomationEvent,
   AutomationEventType,
   Collaborator,
@@ -20,6 +23,10 @@ import type {
   TicketPriority,
   TicketSlaStatus,
   TicketStatus,
+  LgpdConsentStatus,
+  PrivacyRequest,
+  PrivacyRequestStatus,
+  PrivacyRequestType,
 } from "./types.js";
 
 const dataDir = path.resolve(process.cwd(), "data");
@@ -71,7 +78,9 @@ const initialData: DatabaseShape = {
     {
       id: randomUUID(),
       registration: "RP-1001",
+      cpf: "52998224725",
       name: "João Silva",
+      address: "",
       phone: "11977776666",
       unit: "Patos de Minas",
       department: "Operações",
@@ -81,12 +90,18 @@ const initialData: DatabaseShape = {
       whatsappOptInDate: "2026-09-08T08:00:00.000Z",
       whatsappOptInVersion: "v1",
       whatsappOptOutDate: null,
+      lgpdConsentStatus: "accepted",
+      lgpdConsentVersion: "v1",
+      lgpdConsentAt: "2026-09-08T08:00:00.000Z",
+      lgpdConsentRefusedAt: null,
       admittedAt: "2026-01-10",
     },
     {
       id: randomUUID(),
       registration: "RP-1002",
+      cpf: "11144477735",
       name: "Vanessa Souza",
+      address: "",
       phone: "11966665555",
       unit: "Marabá",
       department: "RH",
@@ -96,12 +111,18 @@ const initialData: DatabaseShape = {
       whatsappOptInDate: "2026-09-01T08:00:00.000Z",
       whatsappOptInVersion: "v1",
       whatsappOptOutDate: null,
+      lgpdConsentStatus: "pending",
+      lgpdConsentVersion: null,
+      lgpdConsentAt: null,
+      lgpdConsentRefusedAt: null,
       admittedAt: "2025-03-15",
     },
     {
       id: randomUUID(),
       registration: "RP-1003",
+      cpf: "93541134780",
       name: "Carlos Pereira",
+      address: "",
       phone: "11955554444",
       unit: "Tomaz de Aquino",
       department: "Logística",
@@ -111,6 +132,10 @@ const initialData: DatabaseShape = {
       whatsappOptInDate: null,
       whatsappOptInVersion: null,
       whatsappOptOutDate: "2026-08-30T10:00:00.000Z",
+      lgpdConsentStatus: "refused",
+      lgpdConsentVersion: "v1",
+      lgpdConsentAt: null,
+      lgpdConsentRefusedAt: "2026-08-30T10:00:00.000Z",
       admittedAt: "2024-02-10",
     }
   ],
@@ -119,7 +144,17 @@ const initialData: DatabaseShape = {
 
 function ensureDatabaseShape(data: Partial<DatabaseShape>): DatabaseShape {
   const users = Array.isArray(data.users) && data.users.length > 0 ? data.users : initialUsers;
-  const collaborators = Array.isArray(data.collaborators) ? data.collaborators : initialData.collaborators;
+  const collaborators = Array.isArray(data.collaborators)
+    ? data.collaborators.map((collaborator) => ({
+      ...collaborator,
+      cpf: collaborator.cpf ?? null,
+      address: collaborator.address ?? "",
+      lgpdConsentStatus: collaborator.lgpdConsentStatus ?? "pending",
+      lgpdConsentVersion: collaborator.lgpdConsentVersion ?? null,
+      lgpdConsentAt: collaborator.lgpdConsentAt ?? null,
+      lgpdConsentRefusedAt: collaborator.lgpdConsentRefusedAt ?? null,
+    }))
+    : initialData.collaborators;
   const tickets = Array.isArray(data.tickets) ? data.tickets : [];
 
   return {
@@ -162,7 +197,9 @@ type UserRow = {
 type CollaboratorRow = {
   id: string;
   registration: string;
+  cpf: string | null;
   name: string;
+  address: string;
   phone: string;
   unit: string;
   department: string;
@@ -172,6 +209,10 @@ type CollaboratorRow = {
   whatsapp_opt_in_date: Date | null;
   whatsapp_opt_in_version: string | null;
   whatsapp_opt_out_date: Date | null;
+  lgpd_consent_status: LgpdConsentStatus;
+  lgpd_consent_version: string | null;
+  lgpd_consent_at: Date | null;
+  lgpd_consent_refused_at: Date | null;
   admitted_at: string;
 };
 
@@ -214,6 +255,31 @@ type AutomationEventRow = {
   description: string;
   triggered_by: string;
   created_at: Date;
+};
+
+type AuditLogRow = {
+  id: string;
+  actor_user_id: string | null;
+  actor_name: string;
+  actor_role: AuditLog["actorRole"];
+  action: AuditAction;
+  resource_type: string;
+  resource_id: string | null;
+  metadata: Record<string, unknown>;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: Date;
+};
+
+type PrivacyRequestRow = {
+  id: string;
+  collaborator_id: string;
+  request_type: PrivacyRequestType;
+  status: PrivacyRequestStatus;
+  requested_by: string;
+  notes: string | null;
+  created_at: Date;
+  completed_at: Date | null;
 };
 
 type RoutingRule = {
@@ -293,6 +359,8 @@ function mapCollaboratorRow(row: CollaboratorRow): Collaborator {
   return {
     id: row.id,
     registration: row.registration,
+    cpf: row.cpf,
+    address: row.address,
     name: row.name,
     phone: row.phone,
     unit: row.unit,
@@ -303,6 +371,10 @@ function mapCollaboratorRow(row: CollaboratorRow): Collaborator {
     whatsappOptInDate: row.whatsapp_opt_in_date ? row.whatsapp_opt_in_date.toISOString() : null,
     whatsappOptInVersion: row.whatsapp_opt_in_version,
     whatsappOptOutDate: row.whatsapp_opt_out_date ? row.whatsapp_opt_out_date.toISOString() : null,
+    lgpdConsentStatus: row.lgpd_consent_status,
+    lgpdConsentVersion: row.lgpd_consent_version,
+    lgpdConsentAt: row.lgpd_consent_at ? row.lgpd_consent_at.toISOString() : null,
+    lgpdConsentRefusedAt: row.lgpd_consent_refused_at ? row.lgpd_consent_refused_at.toISOString() : null,
     admittedAt: row.admitted_at,
   };
 }
@@ -454,7 +526,9 @@ export async function initDatabase(): Promise<void> {
     CREATE TABLE IF NOT EXISTS collaborators (
       id UUID PRIMARY KEY,
       registration TEXT NOT NULL UNIQUE,
+      cpf TEXT UNIQUE NULL,
       name TEXT NOT NULL,
+      address TEXT NOT NULL DEFAULT '',
       phone TEXT NOT NULL UNIQUE,
       unit TEXT NOT NULL,
       department TEXT NOT NULL,
@@ -464,6 +538,10 @@ export async function initDatabase(): Promise<void> {
       whatsapp_opt_in_date TIMESTAMPTZ NULL,
       whatsapp_opt_in_version TEXT NULL,
       whatsapp_opt_out_date TIMESTAMPTZ NULL,
+      lgpd_consent_status TEXT NOT NULL DEFAULT 'pending',
+      lgpd_consent_version TEXT NULL,
+      lgpd_consent_at TIMESTAMPTZ NULL,
+      lgpd_consent_refused_at TIMESTAMPTZ NULL,
       admitted_at DATE NOT NULL
     );
 
@@ -507,6 +585,31 @@ export async function initDatabase(): Promise<void> {
       triggered_by TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id UUID PRIMARY KEY,
+      actor_user_id UUID NULL REFERENCES users(id) ON DELETE SET NULL,
+      actor_name TEXT NOT NULL,
+      actor_role TEXT NOT NULL,
+      action TEXT NOT NULL,
+      resource_type TEXT NOT NULL,
+      resource_id TEXT NULL,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      ip_address TEXT NULL,
+      user_agent TEXT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS privacy_requests (
+      id UUID PRIMARY KEY,
+      collaborator_id UUID NOT NULL REFERENCES collaborators(id) ON DELETE RESTRICT,
+      request_type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      requested_by TEXT NOT NULL,
+      notes TEXT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      completed_at TIMESTAMPTZ NULL
+    );
   `);
 
   await runQuery(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS route_target TEXT NOT NULL DEFAULT 'RH Corporativo'`);
@@ -514,6 +617,30 @@ export async function initDatabase(): Promise<void> {
   await runQuery(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_hours INTEGER NOT NULL DEFAULT 24`);
   await runQuery(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
   await runQuery(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_status TEXT NOT NULL DEFAULT 'no_prazo'`);
+  await runQuery(`ALTER TABLE collaborators ADD COLUMN IF NOT EXISTS lgpd_consent_status TEXT NOT NULL DEFAULT 'pending'`);
+  await runQuery(`ALTER TABLE collaborators ADD COLUMN IF NOT EXISTS lgpd_consent_version TEXT NULL`);
+  await runQuery(`ALTER TABLE collaborators ADD COLUMN IF NOT EXISTS lgpd_consent_at TIMESTAMPTZ NULL`);
+  await runQuery(`ALTER TABLE collaborators ADD COLUMN IF NOT EXISTS lgpd_consent_refused_at TIMESTAMPTZ NULL`);
+  await runQuery(`ALTER TABLE collaborators ADD COLUMN IF NOT EXISTS cpf TEXT UNIQUE NULL`);
+  await runQuery(`ALTER TABLE collaborators ADD COLUMN IF NOT EXISTS address TEXT NOT NULL DEFAULT ''`);
+  await runQuery(`
+    CREATE TABLE IF NOT EXISTS consent_records (
+      id UUID PRIMARY KEY,
+      collaborator_id UUID NOT NULL REFERENCES collaborators(id) ON DELETE RESTRICT,
+      registration TEXT NOT NULL,
+      cpf TEXT NULL,
+      collaborator_name TEXT NOT NULL,
+      address TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      term_version TEXT NOT NULL,
+      term_title TEXT NOT NULL,
+      term_text TEXT NOT NULL,
+      decision TEXT NOT NULL,
+      recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      ip_address TEXT NULL,
+      user_agent TEXT NULL
+    )
+  `);
 
   const { rows } = await runQuery<{ users_count: string; collaborators_count: string; tickets_count: string; attachments_count: string; events_count: string }>(`
     SELECT
@@ -548,14 +675,17 @@ export async function initDatabase(): Promise<void> {
     await runQuery(
       `
         INSERT INTO collaborators (
-          id, registration, name, phone, unit, department, job_role, status,
-          whatsapp_opt_in, whatsapp_opt_in_date, whatsapp_opt_in_version, whatsapp_opt_out_date, admitted_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          id, registration, cpf, name, address, phone, unit, department, job_role, status,
+          whatsapp_opt_in, whatsapp_opt_in_date, whatsapp_opt_in_version, whatsapp_opt_out_date,
+          lgpd_consent_status, lgpd_consent_version, lgpd_consent_at, lgpd_consent_refused_at, admitted_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
       `,
       [
         collaborator.id,
         collaborator.registration,
+        collaborator.cpf,
         collaborator.name,
+        collaborator.address,
         normalizePhone(collaborator.phone),
         collaborator.unit,
         collaborator.department,
@@ -565,6 +695,10 @@ export async function initDatabase(): Promise<void> {
         collaborator.whatsappOptInDate,
         collaborator.whatsappOptInVersion,
         collaborator.whatsappOptOutDate,
+        collaborator.lgpdConsentStatus,
+        collaborator.lgpdConsentVersion,
+        collaborator.lgpdConsentAt,
+        collaborator.lgpdConsentRefusedAt,
         collaborator.admittedAt,
       ],
     );
@@ -604,6 +738,26 @@ export async function initDatabase(): Promise<void> {
 
 export function normalizePhone(value: string): string {
   return value.replace(/\D/g, "");
+}
+
+export function normalizeCpf(value: string): string {
+  return value.replace(/\D/g, "");
+}
+
+export function isValidCpf(value: string): boolean {
+  const cpf = normalizeCpf(value);
+  if (cpf.length !== 11 || /^([0-9])\1{10}$/.test(cpf)) {
+    return false;
+  }
+
+  const digits = cpf.split("").map(Number);
+  const calculateDigit = (length: number): number => {
+    const sum = digits.slice(0, length).reduce((total, digit, index) => total + digit * (length + 1 - index), 0);
+    const remainder = (sum * 10) % 11;
+    return remainder === 10 ? 0 : remainder;
+  };
+
+  return calculateDigit(9) === digits[9] && calculateDigit(10) === digits[10];
 }
 
 export function isBusinessHours(reference = new Date()): boolean {
@@ -650,20 +804,25 @@ export async function createCollaborator(collaborator: Omit<Collaborator, "id">)
   const record: Collaborator = {
     id: randomUUID(),
     ...collaborator,
+    cpf: normalizeCpf(collaborator.cpf || "") || null,
+    address: collaborator.address.trim(),
     phone: normalizePhone(collaborator.phone),
   };
 
   await runQuery(
     `
       INSERT INTO collaborators (
-        id, registration, name, phone, unit, department, job_role, status,
-        whatsapp_opt_in, whatsapp_opt_in_date, whatsapp_opt_in_version, whatsapp_opt_out_date, admitted_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        id, registration, cpf, name, address, phone, unit, department, job_role, status,
+        whatsapp_opt_in, whatsapp_opt_in_date, whatsapp_opt_in_version, whatsapp_opt_out_date,
+        lgpd_consent_status, lgpd_consent_version, lgpd_consent_at, lgpd_consent_refused_at, admitted_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
     `,
     [
       record.id,
       record.registration,
+      record.cpf,
       record.name,
+      record.address,
       record.phone,
       record.unit,
       record.department,
@@ -673,6 +832,10 @@ export async function createCollaborator(collaborator: Omit<Collaborator, "id">)
       record.whatsappOptInDate,
       record.whatsappOptInVersion,
       record.whatsappOptOutDate,
+      record.lgpdConsentStatus,
+      record.lgpdConsentVersion,
+      record.lgpdConsentAt,
+      record.lgpdConsentRefusedAt,
       record.admittedAt,
     ],
   );
@@ -699,10 +862,10 @@ export async function deleteCollaborator(id: string): Promise<"deleted" | "not_f
   return "deleted";
 }
 
-export async function updateCollaboratorName(id: string, name: string): Promise<Collaborator | undefined> {
+export async function updateCollaboratorProfile(id: string, name: string, address: string): Promise<Collaborator | undefined> {
   const { rows } = await runQuery<CollaboratorRow>(
-    `UPDATE collaborators SET name = $2 WHERE id = $1 RETURNING *`,
-    [id, name.trim()],
+    `UPDATE collaborators SET name = $2, address = $3 WHERE id = $1 RETURNING *`,
+    [id, name.trim(), address.trim()],
   );
 
   return rows[0] ? mapCollaboratorRow(rows[0]) : undefined;
@@ -717,6 +880,52 @@ export async function findCollaboratorByPhone(phone: string): Promise<Collaborat
     [normalized, nationalNumber, internationalNumber],
   );
   return rows[0] ? mapCollaboratorRow(rows[0]) : undefined;
+}
+
+export async function updateCollaboratorConsent(input: {
+  registration: string;
+  phone: string;
+  status: LgpdConsentStatus;
+  version: string;
+  termTitle: string;
+  termText: string;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}): Promise<Collaborator | undefined> {
+  const consentAt = input.status === "accepted" ? new Date().toISOString() : null;
+  const refusedAt = input.status === "refused" ? new Date().toISOString() : null;
+  const { rows } = await runQuery<CollaboratorRow>(
+    `
+      UPDATE collaborators
+      SET lgpd_consent_status = $3, lgpd_consent_version = $4,
+          lgpd_consent_at = $5, lgpd_consent_refused_at = $6
+      WHERE registration = $1 AND phone IN ($2, CONCAT('55', $2), CASE WHEN LEFT($2, 2) = '55' THEN SUBSTRING($2, 3) ELSE $2 END)
+      RETURNING *
+    `,
+    [input.registration.trim(), normalizePhone(input.phone), input.status, input.version, consentAt, refusedAt],
+  );
+  if (!rows[0]) return undefined;
+
+  const collaborator = mapCollaboratorRow(rows[0]);
+  await runQuery(
+    `
+      INSERT INTO consent_records (
+        id, collaborator_id, registration, cpf, collaborator_name, address, phone,
+        term_version, term_title, term_text, decision, ip_address, user_agent
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    `,
+    [randomUUID(), collaborator.id, collaborator.registration, collaborator.cpf, collaborator.name, collaborator.address,
+      collaborator.phone, input.version, input.termTitle, input.termText, input.status, input.ipAddress ?? null, input.userAgent ?? null],
+  );
+  return collaborator;
+}
+
+export async function listConsentRecords(limit = 500): Promise<ConsentRecord[]> {
+  const { rows } = await runQuery<ConsentRecord>(
+    `SELECT id, collaborator_id AS "collaboratorId", registration, cpf, collaborator_name AS "collaboratorName", address, phone, term_version AS "termVersion", term_title AS "termTitle", term_text AS "termText", decision, recorded_at AS "recordedAt", ip_address AS "ipAddress", user_agent AS "userAgent" FROM consent_records ORDER BY recorded_at ASC LIMIT $1`,
+    [Math.max(1, Math.min(limit, 5000))],
+  );
+  return rows.map((row) => ({ ...row, recordedAt: new Date(row.recordedAt).toISOString() }));
 }
 
 export async function listTickets(): Promise<Ticket[]> {
@@ -836,6 +1045,119 @@ export async function listAutomationEvents(limit = 50): Promise<AutomationEvent[
     [Math.max(1, Math.min(limit, 200))],
   );
   return rows.map(mapAutomationEventRow);
+}
+
+function mapAuditLogRow(row: AuditLogRow): AuditLog {
+  return {
+    id: row.id,
+    actorUserId: row.actor_user_id,
+    actorName: row.actor_name,
+    actorRole: row.actor_role,
+    action: row.action,
+    resourceType: row.resource_type,
+    resourceId: row.resource_id,
+    metadata: row.metadata || {},
+    ipAddress: row.ip_address,
+    userAgent: row.user_agent,
+    createdAt: row.created_at.toISOString(),
+  };
+}
+
+export async function createAuditLog(input: {
+  actorUserId?: string | null;
+  actorName: string;
+  actorRole: AuditLog["actorRole"];
+  action: AuditAction;
+  resourceType: string;
+  resourceId?: string | null;
+  metadata?: Record<string, unknown>;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}): Promise<AuditLog> {
+  const { rows } = await runQuery<AuditLogRow>(
+    `
+      INSERT INTO audit_logs (
+        id, actor_user_id, actor_name, actor_role, action, resource_type, resource_id,
+        metadata, ip_address, user_agent
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)
+      RETURNING *
+    `,
+    [
+      randomUUID(), input.actorUserId ?? null, input.actorName, input.actorRole, input.action,
+      input.resourceType, input.resourceId ?? null, JSON.stringify(input.metadata ?? {}),
+      input.ipAddress ?? null, input.userAgent ?? null,
+    ],
+  );
+  return mapAuditLogRow(rows[0]);
+}
+
+export async function listAuditLogs(limit = 100): Promise<AuditLog[]> {
+  const { rows } = await runQuery<AuditLogRow>(
+    `SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT $1`,
+    [Math.max(1, Math.min(limit, 500))],
+  );
+  return rows.map(mapAuditLogRow);
+}
+
+function mapPrivacyRequestRow(row: PrivacyRequestRow): PrivacyRequest {
+  return {
+    id: row.id,
+    collaboratorId: row.collaborator_id,
+    requestType: row.request_type,
+    status: row.status,
+    requestedBy: row.requested_by,
+    notes: row.notes,
+    createdAt: row.created_at.toISOString(),
+    completedAt: row.completed_at?.toISOString() ?? null,
+  };
+}
+
+export async function createPrivacyRequest(input: {
+  collaboratorId: string;
+  requestType: PrivacyRequestType;
+  requestedBy: string;
+  notes?: string | null;
+}): Promise<PrivacyRequest> {
+  const { rows } = await runQuery<PrivacyRequestRow>(
+    `
+      INSERT INTO privacy_requests (id, collaborator_id, request_type, requested_by, notes)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *
+    `,
+    [randomUUID(), input.collaboratorId, input.requestType, input.requestedBy, input.notes ?? null],
+  );
+  return mapPrivacyRequestRow(rows[0]);
+}
+
+export async function listPrivacyRequests(limit = 100): Promise<PrivacyRequest[]> {
+  const { rows } = await runQuery<PrivacyRequestRow>(
+    `SELECT * FROM privacy_requests ORDER BY created_at DESC LIMIT $1`,
+    [Math.max(1, Math.min(limit, 500))],
+  );
+  return rows.map(mapPrivacyRequestRow);
+}
+
+export async function exportCollaboratorData(id: string) {
+  const collaborator = (await runQuery<CollaboratorRow>(`SELECT * FROM collaborators WHERE id = $1`, [id])).rows[0];
+  if (!collaborator) return undefined;
+  const tickets = (await runQuery<TicketRow>(`SELECT * FROM tickets WHERE collaborator_id = $1 ORDER BY created_at DESC`, [id])).rows.map(mapTicketRow);
+  const requests = (await runQuery<PrivacyRequestRow>(`SELECT * FROM privacy_requests WHERE collaborator_id = $1 ORDER BY created_at DESC`, [id])).rows.map(mapPrivacyRequestRow);
+  return { collaborator: mapCollaboratorRow(collaborator), tickets, privacyRequests: requests };
+}
+
+export async function anonymizeCollaborator(id: string): Promise<Collaborator | undefined> {
+  const { rows } = await runQuery<CollaboratorRow>(
+    `
+      UPDATE collaborators
+      SET name = 'Titular anonimizado', phone = CONCAT('anon-', id::text),
+          whatsapp_opt_in = FALSE, whatsapp_opt_in_date = NULL,
+          whatsapp_opt_in_version = NULL, whatsapp_opt_out_date = COALESCE(whatsapp_opt_out_date, NOW())
+      WHERE id = $1
+      RETURNING *
+    `,
+    [id],
+  );
+  return rows[0] ? mapCollaboratorRow(rows[0]) : undefined;
 }
 
 export async function createTicketFromWebhookMessage(input: {

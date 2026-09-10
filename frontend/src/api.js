@@ -71,11 +71,26 @@ export function deleteCollaborator(collaboratorId) {
   });
 }
 
-export function updateCollaboratorName(collaboratorId, name) {
+export function updateCollaboratorProfile(collaboratorId, payload) {
   return request(`/collaborators/${collaboratorId}`, {
     method: "PATCH",
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(payload),
   });
+}
+
+export async function downloadConsentRecordsCsv() {
+  const token = window.localStorage.getItem("rh-central-token");
+  const response = await fetch(`${API_URL}/privacy/consent-records.csv`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) throw new Error("Não foi possível exportar a planilha de consentimentos.");
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "consentimentos-lgpd.csv";
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 export function getTickets() {
@@ -102,6 +117,47 @@ export function createWebhookIntake(payload) {
 
 export function getAutomationEvents() {
   return request("/automation/events");
+}
+
+export function getAuditLogs() {
+  return request("/audit-logs");
+}
+
+export function getPrivacyRequests() {
+  return request("/privacy/requests");
+}
+
+export function getPrivacyTerms() {
+  return request("/privacy/terms");
+}
+
+export function getConsentRecords() {
+  return request("/privacy/consent-records");
+}
+
+export function submitPrivacyConsent(payload) {
+  return request("/privacy/consent", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createPrivacyRequest(payload) {
+  return request("/privacy/requests", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function exportCollaboratorData(collaboratorId) {
+  return request(`/privacy/collaborators/${collaboratorId}/export`);
+}
+
+export function anonymizeCollaborator(collaboratorId) {
+  return request(`/privacy/collaborators/${collaboratorId}/anonymize`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
 }
 
 export function runSlaSweep() {
@@ -144,4 +200,21 @@ export async function uploadTicketAttachment(ticketId, file, attachmentType) {
     throw new Error(message);
   }
   return data;
+}
+
+export async function downloadTicketAttachment(fileName, downloadName = fileName) {
+  const token = window.localStorage.getItem("rh-central-token");
+  const response = await fetch(`${API_URL.replace(/\/api$/, "")}/uploads/${encodeURIComponent(fileName)}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) {
+    throw new Error("Não foi possível abrir o anexo.");
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = downloadName;
+  link.click();
+  URL.revokeObjectURL(url);
 }

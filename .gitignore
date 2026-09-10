@@ -1,6 +1,9 @@
 # Node dependencies
 backend/node_modules/
 frontend/node_modules/
+backend/uploads/
+**/.env
+!**/.env.example
 
 # Build outputs
 backend/dist/

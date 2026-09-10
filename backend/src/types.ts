@@ -31,11 +31,17 @@ export type AutomationEventType =
   | "manager_escalation"
   | "ticket_resolved_followup";
 export type InsightSeverity = "low" | "medium" | "high";
+export type AuditAction = "login" | "create" | "update" | "delete" | "export" | "anonymize" | "system";
+export type PrivacyRequestType = "access" | "correction" | "deletion" | "consent_revocation";
+export type PrivacyRequestStatus = "open" | "completed" | "rejected";
+export type LgpdConsentStatus = "pending" | "accepted" | "refused";
 
 export interface Collaborator {
   id: string;
   registration: string;
+  cpf: string | null;
   name: string;
+  address: string;
   phone: string;
   unit: string;
   department: string;
@@ -45,7 +51,28 @@ export interface Collaborator {
   whatsappOptInDate: string | null;
   whatsappOptInVersion: string | null;
   whatsappOptOutDate: string | null;
+  lgpdConsentStatus: LgpdConsentStatus;
+  lgpdConsentVersion: string | null;
+  lgpdConsentAt: string | null;
+  lgpdConsentRefusedAt: string | null;
   admittedAt: string;
+}
+
+export interface ConsentRecord {
+  id: string;
+  collaboratorId: string;
+  registration: string;
+  cpf: string | null;
+  collaboratorName: string;
+  address: string;
+  phone: string;
+  termVersion: string;
+  termTitle: string;
+  termText: string;
+  decision: Exclude<LgpdConsentStatus, "pending">;
+  recordedAt: string;
+  ipAddress: string | null;
+  userAgent: string | null;
 }
 
 export interface Ticket {
@@ -98,6 +125,31 @@ export interface SmartInsight {
   severity: InsightSeverity;
   metricValue: number;
   action: string;
+}
+
+export interface AuditLog {
+  id: string;
+  actorUserId: string | null;
+  actorName: string;
+  actorRole: AuthRole | "system";
+  action: AuditAction;
+  resourceType: string;
+  resourceId: string | null;
+  metadata: Record<string, unknown>;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: string;
+}
+
+export interface PrivacyRequest {
+  id: string;
+  collaboratorId: string;
+  requestType: PrivacyRequestType;
+  status: PrivacyRequestStatus;
+  requestedBy: string;
+  notes: string | null;
+  createdAt: string;
+  completedAt: string | null;
 }
 
 export interface DatabaseShape {

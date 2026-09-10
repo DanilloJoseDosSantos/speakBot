@@ -10,31 +10,39 @@ import { initDatabase } from "./store.js";
 import {
   buildDashboard,
   buildSmartInsights,
+  createAuditLog,
   createAutomationEvent,
   createCollaborator,
+  createPrivacyRequest,
   createTicket,
   createTicketAttachment,
   createTicketFromWebhookMessage,
-  deleteCollaborator,
+  exportCollaboratorData,
   findCollaboratorByPhone,
   findUserByUsername,
   getTicketById,
   listAutomationEvents,
+  listAuditLogs,
+  listConsentRecords,
   listCollaborators,
   listManagerCriticalQueue,
   listRoutingRules,
   listTicketAttachments,
   listTickets,
+  listPrivacyRequests,
   normalizePhone,
+  normalizeCpf,
+  isValidCpf,
   roleCanManageCollaborators,
   roleCanManageTickets,
   runSlaAutomationSweep,
   sanitizeUser,
-  updateCollaboratorName,
+  updateCollaboratorProfile,
   updateTicket,
   verifyUserCredentials,
+  updateCollaboratorConsent,
 } from "./store.js";
-import type { AuthRole, CollaboratorStatus, TicketAttachmentType, TicketCategory, TicketPriority, TicketStatus } from "./types.js";
+import type { AuthRole, CollaboratorStatus, LgpdConsentStatus, TicketAttachmentType, TicketCategory, TicketPriority, TicketStatus } from "./types.js";
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -43,6 +51,8 @@ const metaAccessToken = process.env.META_ACCESS_TOKEN;
 const metaPhoneNumberId = process.env.META_PHONE_NUMBER_ID;
 const metaGraphApiVersion = process.env.META_GRAPH_API_VERSION || "v23.0";
 const metaAppSecret = process.env.META_APP_SECRET;
+const publicAppUrl = process.env.PUBLIC_APP_URL || "http://localhost:5173";
+const corsOrigins = (process.env.CORS_ORIGIN || "http://localhost:5173").split(",").map((origin) => origin.trim()).filter(Boolean);
 const sessions = new Map<string, { id: string; username: string; name: string; role: AuthRole; active: boolean }>();
 const rawBodies = new WeakMap<object, string>();
 const uploadsDir = path.resolve(process.cwd(), "uploads");
@@ -56,14 +66,13 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 },
 });
 
-app.use(cors());
+app.use(cors({ origin: corsOrigins.length === 1 && corsOrigins[0] === "*" ? true : corsOrigins }));
 app.use(express.json({
+  limit: "1mb",
   verify: (request, _response, buffer) => {
     rawBodies.set(request, buffer.toString("utf8"));
   },
 }));
-app.use("/uploads", express.static(uploadsDir));
-
 const loginSchema = z.object({
   username: z.string().min(2),
   password: z.string().min(4),
@@ -71,7 +80,9 @@ const loginSchema = z.object({
 
 const collaboratorSchema = z.object({
   registration: z.string().min(3),
+  cpf: z.string().transform(normalizeCpf).refine(isValidCpf, "Informe um CPF válido."),
   name: z.string().min(3),
+  address: z.string().trim().min(3),
   phone: z.string().min(10),
   unit: z.string().min(2),
   department: z.string().min(2),
@@ -81,11 +92,16 @@ const collaboratorSchema = z.object({
   whatsappOptInDate: z.string().nullable(),
   whatsappOptInVersion: z.string().nullable(),
   whatsappOptOutDate: z.string().nullable(),
+  lgpdConsentStatus: z.enum(["pending", "accepted", "refused"]).default("pending"),
+  lgpdConsentVersion: z.string().nullable().default(null),
+  lgpdConsentAt: z.string().nullable().default(null),
+  lgpdConsentRefusedAt: z.string().nullable().default(null),
   admittedAt: z.string().min(10),
 });
 
-const collaboratorNameSchema = z.object({
+const collaboratorProfileSchema = z.object({
   name: z.string().trim().min(3),
+  address: z.string().trim().min(3),
 });
 
 const intakeSchema = z.object({
@@ -105,6 +121,24 @@ const webhookSchema = z.object({
   phone: z.string().min(10),
   message: z.string().min(3),
 });
+
+const privacyRequestSchema = z.object({
+  collaboratorId: z.string().uuid(),
+  requestType: z.enum(["access", "correction", "deletion", "consent_revocation"]),
+  notes: z.string().trim().max(500).nullable().optional(),
+});
+
+const consentSchema = z.object({
+  registration: z.string().min(3),
+  phone: z.string().min(10),
+  decision: z.enum(["accepted", "refused"] satisfies [Exclude<LgpdConsentStatus, "pending">, ...Exclude<LgpdConsentStatus, "pending">[]]),
+});
+
+const lgpdTerms = {
+  version: "v1",
+  title: "Termo de privacidade e tratamento de dados",
+  text: "A Rede Patao poderá tratar os dados cadastrais e as informações fornecidas no atendimento para executar rotinas de RH, responder solicitações, cumprir obrigações legais e proteger direitos. O titular pode solicitar acesso, correção, informação sobre o uso e anonimização quando aplicável. O aceite deste termo não substitui o consentimento específico do WhatsApp.",
+};
 
 function getBaseUrl(request: express.Request): string {
   return `${request.protocol}://${request.get("host")}`;
@@ -158,6 +192,13 @@ async function sendMetaTextMessage(to: string, body: string): Promise<void> {
   }
 }
 
+async function sendConsentInvitation(phone: string, registration: string): Promise<"sent" | "not_configured"> {
+  if (!metaAccessToken || !metaPhoneNumberId) return "not_configured";
+  const consentUrl = `${publicAppUrl}/consent?registration=${encodeURIComponent(registration)}`;
+  await sendMetaTextMessage(phone, `Olá! Acesse o termo de privacidade da Central RH e registre sua decisão (aceitar ou recusar): ${consentUrl}`);
+  return "sent";
+}
+
 async function requireAuth(request: express.Request, response: express.Response) {
   const token = getBearerToken(request.header("authorization"));
   if (!token) {
@@ -175,8 +216,84 @@ async function requireAuth(request: express.Request, response: express.Response)
   return session;
 }
 
+app.get("/uploads/:fileName", async (request, response) => {
+  const session = await requireAuth(request, response);
+  if (!session) return;
+
+  const fileName = path.basename(String(request.params.fileName));
+  const filePath = path.join(uploadsDir, fileName);
+  if (!fs.existsSync(filePath)) {
+    response.status(404).json({ detail: "Anexo não encontrado." });
+    return;
+  }
+  response.sendFile(filePath);
+});
+
 app.get("/api/health", (_request, response) => {
   response.json({ status: "ok", service: "speakBot-backend" });
+});
+
+app.get("/api/privacy/terms", (_request, response) => {
+  response.json(lgpdTerms);
+});
+
+app.get("/api/privacy/consent-records.csv", async (request, response) => {
+  const session = await requireAuth(request, response);
+  if (!session) return;
+  if (session.role !== "rh") {
+    response.status(403).json({ detail: "Somente RH pode exportar o arquivo de consentimentos." });
+    return;
+  }
+  const records = await listConsentRecords();
+  const escapeCsv = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const header = ["id", "collaboratorId", "registration", "cpf", "collaboratorName", "address", "phone", "termVersion", "termTitle", "termText", "decision", "recordedAt", "ipAddress", "userAgent"];
+  const lines = [header.join(","), ...records.map((record) => header.map((field) => escapeCsv(record[field as keyof typeof record])).join(","))];
+  response.setHeader("Content-Type", "text/csv; charset=utf-8");
+  response.setHeader("Content-Disposition", "attachment; filename=consentimentos-lgpd.csv");
+  response.send(`\uFEFF${lines.join("\n")}`);
+});
+
+app.get("/api/privacy/consent-records", async (request, response) => {
+  const session = await requireAuth(request, response);
+  if (!session) return;
+  if (session.role !== "rh") {
+    response.status(403).json({ detail: "Somente RH pode consultar os registros de consentimento." });
+    return;
+  }
+  response.json(await listConsentRecords());
+});
+
+app.post("/api/privacy/consent", async (request, response) => {
+  const parsed = consentSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ detail: parsed.error.flatten() });
+    return;
+  }
+  const collaborator = await updateCollaboratorConsent({
+    registration: parsed.data.registration,
+    phone: parsed.data.phone,
+    status: parsed.data.decision,
+    version: lgpdTerms.version,
+    termTitle: lgpdTerms.title,
+    termText: lgpdTerms.text,
+    ipAddress: request.ip,
+    userAgent: request.get("user-agent") || null,
+  });
+  if (!collaborator) {
+    response.status(403).json({ detail: "Matrícula e telefone não conferem com um cadastro ativo." });
+    return;
+  }
+  await createAuditLog({
+    actorName: "titular",
+    actorRole: "system",
+    action: "update",
+    resourceType: "lgpd_consent",
+    resourceId: collaborator.id,
+    metadata: { decision: parsed.data.decision, version: lgpdTerms.version },
+    ipAddress: request.ip,
+    userAgent: request.get("user-agent") || null,
+  });
+  response.json({ accepted: true, consent: { status: collaborator.lgpdConsentStatus, version: collaborator.lgpdConsentVersion, recordedAt: collaborator.lgpdConsentAt || collaborator.lgpdConsentRefusedAt } });
 });
 
 app.get("/api/whatsapp/meta/webhook", (request, response) => {
@@ -232,6 +349,15 @@ app.post("/api/login", async (request, response) => {
 
   const user = await verifyUserCredentials(parsed.data.username, parsed.data.password);
   if (!user) {
+    await createAuditLog({
+      actorName: parsed.data.username,
+      actorRole: "system",
+      action: "login",
+      resourceType: "session",
+      metadata: { outcome: "failure" },
+      ipAddress: request.ip,
+      userAgent: request.get("user-agent") || null,
+    });
     response.status(401).json({ detail: "Usuário ou senha inválidos." });
     return;
   }
@@ -239,6 +365,16 @@ app.post("/api/login", async (request, response) => {
   const token = randomUUID();
   const safeUser = sanitizeUser(user);
   sessions.set(token, safeUser);
+  await createAuditLog({
+    actorUserId: user.id,
+    actorName: user.name,
+    actorRole: user.role,
+    action: "login",
+    resourceType: "session",
+    metadata: { outcome: "success" },
+    ipAddress: request.ip,
+    userAgent: request.get("user-agent") || null,
+  });
   response.json({ token, user: safeUser });
 });
 
@@ -285,6 +421,93 @@ app.get("/api/automation/events", async (request, response) => {
   }
 
   response.json(await listAutomationEvents(80));
+});
+
+app.get("/api/audit-logs", async (request, response) => {
+  const session = await requireAuth(request, response);
+  if (!session) return;
+  if (session.role !== "rh") {
+    response.status(403).json({ detail: "Somente RH pode consultar a trilha de auditoria." });
+    return;
+  }
+  response.json(await listAuditLogs(Number(request.query.limit) || 100));
+});
+
+app.get("/api/privacy/requests", async (request, response) => {
+  const session = await requireAuth(request, response);
+  if (!session) return;
+  if (session.role !== "rh") {
+    response.status(403).json({ detail: "Somente RH pode consultar solicitações LGPD." });
+    return;
+  }
+  response.json(await listPrivacyRequests(Number(request.query.limit) || 100));
+});
+
+app.post("/api/privacy/requests", async (request, response) => {
+  const session = await requireAuth(request, response);
+  if (!session) return;
+  if (session.role !== "rh") {
+    response.status(403).json({ detail: "Somente RH pode registrar solicitações LGPD." });
+    return;
+  }
+  const parsed = privacyRequestSchema.safeParse(request.body);
+  if (!parsed.success) {
+    response.status(400).json({ detail: parsed.error.flatten() });
+    return;
+  }
+  const collaborator = (await listCollaborators()).find((item) => item.id === parsed.data.collaboratorId);
+  if (!collaborator) {
+    response.status(404).json({ detail: "Colaborador não encontrado." });
+    return;
+  }
+  const privacyRequest = await createPrivacyRequest({
+    ...parsed.data,
+    requestedBy: session.name,
+  });
+  await createAuditLog({
+    actorUserId: session.id,
+    actorName: session.name,
+    actorRole: session.role,
+    action: "create",
+    resourceType: "privacy_request",
+    resourceId: privacyRequest.id,
+    metadata: { requestType: privacyRequest.requestType, collaboratorId: collaborator.id },
+    ipAddress: request.ip,
+    userAgent: request.get("user-agent") || null,
+  });
+  response.status(201).json(privacyRequest);
+});
+
+app.get("/api/privacy/collaborators/:id/export", async (request, response) => {
+  const session = await requireAuth(request, response);
+  if (!session) return;
+  if (session.role !== "rh") {
+    response.status(403).json({ detail: "Somente RH pode exportar dados pessoais." });
+    return;
+  }
+  const exported = await exportCollaboratorData(String(request.params.id));
+  if (!exported) {
+    response.status(404).json({ detail: "Colaborador não encontrado." });
+    return;
+  }
+  await createAuditLog({
+    actorUserId: session.id,
+    actorName: session.name,
+    actorRole: session.role,
+    action: "export",
+    resourceType: "collaborator_data",
+    resourceId: String(request.params.id),
+    metadata: { ticketCount: exported.tickets.length },
+    ipAddress: request.ip,
+    userAgent: request.get("user-agent") || null,
+  });
+  response.json({ exportedAt: new Date().toISOString(), ...exported });
+});
+
+app.post("/api/privacy/collaborators/:id/anonymize", async (request, response) => {
+  const session = await requireAuth(request, response);
+  if (!session) return;
+  response.status(405).json({ detail: "A anonimização operacional está desativada para preservar o arquivo imutável de consentimentos." });
 });
 
 app.post("/api/automation/sla-sweep", async (request, response) => {
@@ -348,18 +571,49 @@ app.post("/api/collaborators", async (request, response) => {
   }
 
   const normalizedPhone = normalizePhone(parsed.data.phone);
-  const existing = (await listCollaborators()).find((item) => item.phone === normalizedPhone || item.registration === parsed.data.registration);
+  const normalizedCpf = normalizeCpf(parsed.data.cpf);
+  const existing = (await listCollaborators()).find((item) => item.phone === normalizedPhone || item.registration === parsed.data.registration || item.cpf === normalizedCpf);
   if (existing) {
-    response.status(409).json({ detail: "Colaborador já cadastrado com este telefone ou matrícula." });
+    response.status(409).json({ detail: "Colaborador já cadastrado com este telefone, matrícula ou CPF." });
     return;
   }
 
   const collaborator = await createCollaborator({
     ...parsed.data,
+    cpf: normalizedCpf,
     phone: normalizedPhone,
   });
 
-  response.status(201).json(collaborator);
+  let consentInvitation: "sent" | "not_configured" = "not_configured";
+  if (collaborator.whatsappOptIn) {
+    try {
+      consentInvitation = await sendConsentInvitation(collaborator.phone, collaborator.registration);
+    } catch (error) {
+      await createAuditLog({
+        actorUserId: session.id,
+        actorName: session.name,
+        actorRole: session.role,
+        action: "system",
+        resourceType: "consent_invitation",
+        resourceId: collaborator.id,
+        metadata: { outcome: "failed", detail: error instanceof Error ? error.message : "unknown" },
+      });
+    }
+  }
+
+  await createAuditLog({
+    actorUserId: session.id,
+    actorName: session.name,
+    actorRole: session.role,
+    action: "create",
+    resourceType: "collaborator",
+    resourceId: collaborator.id,
+    metadata: { registration: collaborator.registration, unit: collaborator.unit },
+    ipAddress: request.ip,
+    userAgent: request.get("user-agent") || null,
+  });
+
+  response.status(201).json({ collaborator, consentInvitation });
 });
 
 app.delete("/api/collaborators/:id", async (request, response) => {
@@ -367,27 +621,7 @@ app.delete("/api/collaborators/:id", async (request, response) => {
   if (!session) {
     return;
   }
-
-  if (!roleCanManageCollaborators(session.role)) {
-    response.status(403).json({ detail: "Somente RH pode excluir colaboradores." });
-    return;
-  }
-
-  const result = await deleteCollaborator(String(request.params.id));
-  if (result === "not_found") {
-    response.status(404).json({ detail: "Colaborador não encontrado." });
-    return;
-  }
-  if (result === "not_terminated") {
-    response.status(409).json({ detail: "Somente colaboradores desligados podem ser excluídos." });
-    return;
-  }
-  if (result === "has_tickets") {
-    response.status(409).json({ detail: "Este colaborador possui tickets vinculados e deve permanecer arquivado." });
-    return;
-  }
-
-  response.status(204).send();
+  response.status(405).json({ detail: "Dados cadastrais não podem ser apagados. Apenas nome e endereço podem ser corrigidos pelo RH." });
 });
 
 app.patch("/api/collaborators/:id", async (request, response) => {
@@ -401,17 +635,29 @@ app.patch("/api/collaborators/:id", async (request, response) => {
     return;
   }
 
-  const parsed = collaboratorNameSchema.safeParse(request.body);
+  const parsed = collaboratorProfileSchema.safeParse(request.body);
   if (!parsed.success) {
     response.status(400).json({ detail: "Informe um nome com pelo menos 3 caracteres." });
     return;
   }
 
-  const collaborator = await updateCollaboratorName(String(request.params.id), parsed.data.name);
+  const collaborator = await updateCollaboratorProfile(String(request.params.id), parsed.data.name, parsed.data.address);
   if (!collaborator) {
     response.status(404).json({ detail: "Colaborador não encontrado." });
     return;
   }
+
+  await createAuditLog({
+    actorUserId: session.id,
+    actorName: session.name,
+    actorRole: session.role,
+    action: "update",
+    resourceType: "collaborator",
+    resourceId: collaborator.id,
+    metadata: { fields: ["name"] },
+    ipAddress: request.ip,
+    userAgent: request.get("user-agent") || null,
+  });
 
   response.json(collaborator);
 });
@@ -459,6 +705,17 @@ app.post("/api/tickets/intake", async (request, response) => {
     message: parsed.data.message,
   });
 
+  await createAuditLog({
+    actorName: "intake-manual",
+    actorRole: "system",
+    action: "create",
+    resourceType: "ticket",
+    resourceId: ticket.id,
+    metadata: { channel: ticket.channel, category: ticket.category, priority: ticket.priority },
+    ipAddress: request.ip,
+    userAgent: request.get("user-agent") || null,
+  });
+
   response.status(201).json({
     accepted: true,
     message: "Solicitação registrada na Central RH.",
@@ -478,6 +735,16 @@ app.post("/api/whatsapp/webhook", async (request, response) => {
 
   try {
     const result = await createTicketFromWebhookMessage(parsed.data);
+    await createAuditLog({
+      actorName: "whatsapp-webhook",
+      actorRole: "system",
+      action: "create",
+      resourceType: "ticket",
+      resourceId: result.ticket.id,
+      metadata: { channel: "whatsapp", category: result.ticket.category, priority: result.ticket.priority },
+      ipAddress: request.ip,
+      userAgent: request.get("user-agent") || null,
+    });
     response.status(201).json({
       accepted: true,
       mode: "automated",
@@ -526,6 +793,18 @@ app.patch("/api/tickets/:id", async (request, response) => {
       triggeredBy: session.name,
     });
   }
+
+  await createAuditLog({
+    actorUserId: session.id,
+    actorName: session.name,
+    actorRole: session.role,
+    action: "update",
+    resourceType: "ticket",
+    resourceId: updated.id,
+    metadata: { fields: Object.keys(parsed.data) },
+    ipAddress: request.ip,
+    userAgent: request.get("user-agent") || null,
+  });
 
   response.json({
     ...updated,
@@ -577,6 +856,18 @@ app.post("/api/tickets/:id/attachments", upload.single("file"), async (request, 
     attachmentType: parsedType.data,
     uploadedBy: session.name,
   }, getBaseUrl(request));
+
+  await createAuditLog({
+    actorUserId: session.id,
+    actorName: session.name,
+    actorRole: session.role,
+    action: "create",
+    resourceType: "ticket_attachment",
+    resourceId: attachment.id,
+    metadata: { ticketId, attachmentType: attachment.attachmentType, sizeBytes: attachment.sizeBytes },
+    ipAddress: request.ip,
+    userAgent: request.get("user-agent") || null,
+  });
 
   const collaborator = (await listCollaborators()).find((item) => item.id === ticket.collaboratorId) ?? null;
   const attachmentsByTicketId = await listTicketAttachments([ticketId], getBaseUrl(request));

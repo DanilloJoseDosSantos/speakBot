@@ -17,67 +17,6 @@
       "active": true
     }
   ],
-  "collaborators": [
-    {
-      "id": "1c557f45-631e-4501-bdd3-6324067b9813",
-      "registration": "RP-1001",
-      "name": "João Silva",
-      "phone": "11977776666",
-      "unit": "Patos de Minas",
-      "department": "Operações",
-      "role": "Frentista",
-      "status": "ATIVO",
-      "whatsappOptIn": true,
-      "whatsappOptInDate": "2026-09-08T08:00:00.000Z",
-      "whatsappOptInVersion": "v1",
-      "whatsappOptOutDate": null,
-      "admittedAt": "2026-01-10"
-    },
-    {
-      "id": "ac7a7d9f-4ccf-415b-ac68-f9cb153e2e74",
-      "registration": "RP-1002",
-      "name": "Vanessa Souza",
-      "phone": "11966665555",
-      "unit": "Marabá",
-      "department": "RH",
-      "role": "Assistente RH",
-      "status": "ATIVO",
-      "whatsappOptIn": true,
-      "whatsappOptInDate": "2026-09-01T08:00:00.000Z",
-      "whatsappOptInVersion": "v1",
-      "whatsappOptOutDate": null,
-      "admittedAt": "2025-03-15"
-    },
-    {
-      "id": "cfc2c540-70b7-437d-b04a-705cd39443a2",
-      "registration": "RP-1003",
-      "name": "Carlos Pereira",
-      "phone": "11955554444",
-      "unit": "Tomaz de Aquino",
-      "department": "Logística",
-      "role": "Motorista",
-      "status": "DESLIGADO",
-      "whatsappOptIn": false,
-      "whatsappOptInDate": null,
-      "whatsappOptInVersion": null,
-      "whatsappOptOutDate": "2026-08-30T10:00:00.000Z",
-      "admittedAt": "2024-02-10"
-    }
-  ],
-  "tickets": [
-    {
-      "id": "8b43339b-11eb-4dd4-92fc-d56b9bca29e7",
-      "protocol": "RH-20260908-00001",
-      "collaboratorId": "1c557f45-631e-4501-bdd3-6324067b9813",
-      "category": "falta_atraso",
-      "priority": "alta",
-      "status": "novo",
-      "channel": "whatsapp",
-      "serviceWindow": "dentro_do_horario",
-      "message": "Bom dia, preciso informar atraso por problema de transporte.",
-      "createdAt": "2026-09-08T13:12:21.837Z",
-      "assignedTo": null,
-      "lastUpdateAt": "2026-09-08T13:12:21.837Z"
-    }
-  ]
+  "collaborators": [],
+  "tickets": []
 }
